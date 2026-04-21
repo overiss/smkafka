@@ -37,15 +37,18 @@ type CommonConfig struct {
 }
 
 type ProducerConfig struct {
-	Common    CommonConfig
-	Topic     string
-	Partition *int32
-	ClientID  string
-	Overrides map[string]any
+	Common           CommonConfig
+	Name             string
+	Topic            string
+	Partition        *int32
+	ReadinessTimeout time.Duration
+	ClientID         string
+	Overrides        map[string]any
 }
 
 type ConsumerConfig struct {
 	Common           CommonConfig
+	Name             string
 	Topic            string
 	GroupID          string
 	AutoOffsetReset  string
@@ -53,6 +56,7 @@ type ConsumerConfig struct {
 	BatchSize        int
 	BatchDeadline    time.Duration
 	ReconnectTimeout time.Duration
+	ReadinessTimeout time.Duration
 	ClientID         string
 	Overrides        map[string]any
 }

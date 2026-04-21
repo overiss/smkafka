@@ -10,11 +10,14 @@ import (
 )
 
 const PartitionAny int32 = kafka.PartitionAny
+const defaultReadinessTimeout = 3 * time.Second
 
 type Producer struct {
-	client    producerClient
-	topic     string
-	partition int32
+	client           producerClient
+	name             string
+	topic            string
+	partition        int32
+	readinessTimeout time.Duration
 }
 
 func NewProducer(cfg ProducerConfig) (*Producer, error) {
@@ -37,11 +40,36 @@ func NewProducer(cfg ProducerConfig) (*Producer, error) {
 		partition = *cfg.Partition
 	}
 
+	name := cfg.Name
+	if name == "" {
+		name = "smkafka-producer"
+	}
+
+	readinessTimeout := cfg.ReadinessTimeout
+	if readinessTimeout <= 0 {
+		readinessTimeout = defaultReadinessTimeout
+	}
+
 	return &Producer{
-		client:    client,
-		topic:     cfg.Topic,
-		partition: partition,
+		client:           client,
+		name:             name,
+		topic:            cfg.Topic,
+		partition:        partition,
+		readinessTimeout: readinessTimeout,
 	}, nil
+}
+
+func (p *Producer) Name() string {
+	return p.name
+}
+
+func (p *Producer) IsReady() bool {
+	timeoutMs := int(p.readinessTimeout.Milliseconds())
+	if timeoutMs <= 0 {
+		timeoutMs = int(defaultReadinessTimeout.Milliseconds())
+	}
+	_, err := p.client.GetMetadata(nil, false, timeoutMs)
+	return err == nil
 }
 
 func (p *Producer) Produce(ctx context.Context, message []byte) error {

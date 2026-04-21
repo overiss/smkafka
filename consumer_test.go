@@ -13,6 +13,7 @@ type mockConsumerClient struct {
 	commitOffsetsFn   func(offsets []kafka.TopicPartition) ([]kafka.TopicPartition, error)
 	assignmentFn      func() ([]kafka.TopicPartition, error)
 	offsetsForTimesFn func(times []kafka.TopicPartition, timeoutMs int) ([]kafka.TopicPartition, error)
+	metadataFn        func(topic *string, allTopics bool, timeoutMs int) (*kafka.Metadata, error)
 	resumeFn          func(partitions []kafka.TopicPartition) error
 }
 
@@ -32,6 +33,13 @@ func (m *mockConsumerClient) Assignment() ([]kafka.TopicPartition, error) {
 
 func (m *mockConsumerClient) OffsetsForTimes(times []kafka.TopicPartition, timeoutMs int) ([]kafka.TopicPartition, error) {
 	return m.offsetsForTimesFn(times, timeoutMs)
+}
+
+func (m *mockConsumerClient) GetMetadata(topic *string, allTopics bool, timeoutMs int) (*kafka.Metadata, error) {
+	if m.metadataFn == nil {
+		return &kafka.Metadata{}, nil
+	}
+	return m.metadataFn(topic, allTopics, timeoutMs)
 }
 
 func (m *mockConsumerClient) Resume(partitions []kafka.TopicPartition) error {
@@ -134,5 +142,31 @@ func TestConsumerCommitBatchRestoresBatchOnFailure(t *testing.T) {
 	}
 	if batch := consumer.takeLastBatch(); len(batch) != 1 {
 		t.Fatalf("expected batch restored after error, got len=%d", len(batch))
+	}
+}
+
+func TestConsumerReadiness(t *testing.T) {
+	mock := &mockConsumerClient{
+		commitFn:          func() ([]kafka.TopicPartition, error) { return nil, nil },
+		commitOffsetsFn:   func(_ []kafka.TopicPartition) ([]kafka.TopicPartition, error) { return nil, nil },
+		assignmentFn:      func() ([]kafka.TopicPartition, error) { return nil, nil },
+		offsetsForTimesFn: func(times []kafka.TopicPartition, _ int) ([]kafka.TopicPartition, error) { return times, nil },
+		metadataFn: func(_ *string, _ bool, _ int) (*kafka.Metadata, error) {
+			return &kafka.Metadata{}, nil
+		},
+		resumeFn: func(_ []kafka.TopicPartition) error { return nil },
+	}
+
+	consumer := &Consumer{
+		client:           mock,
+		name:             "orders-consumer",
+		readinessTimeout: time.Second,
+	}
+
+	if consumer.Name() != "orders-consumer" {
+		t.Fatalf("unexpected name: %s", consumer.Name())
+	}
+	if !consumer.IsReady() {
+		t.Fatal("expected consumer to be ready")
 	}
 }

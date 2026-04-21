@@ -4,16 +4,25 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
 type mockProducerClient struct {
-	produceFn func(msg *kafka.Message, deliveryChan chan kafka.Event) error
+	produceFn  func(msg *kafka.Message, deliveryChan chan kafka.Event) error
+	metadataFn func(topic *string, allTopics bool, timeoutMs int) (*kafka.Metadata, error)
 }
 
 func (m *mockProducerClient) Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error {
 	return m.produceFn(msg, deliveryChan)
+}
+
+func (m *mockProducerClient) GetMetadata(topic *string, allTopics bool, timeoutMs int) (*kafka.Metadata, error) {
+	if m.metadataFn == nil {
+		return &kafka.Metadata{}, nil
+	}
+	return m.metadataFn(topic, allTopics, timeoutMs)
 }
 
 func (m *mockProducerClient) Flush(_ int) int { return 0 }
@@ -42,6 +51,28 @@ func TestProducerProduceManySuccess(t *testing.T) {
 	}
 	if produced != 2 {
 		t.Fatalf("expected 2 produced messages, got %d", produced)
+	}
+}
+
+func TestProducerReadiness(t *testing.T) {
+	mock := &mockProducerClient{
+		produceFn: func(_ *kafka.Message, _ chan kafka.Event) error { return nil },
+		metadataFn: func(_ *string, _ bool, _ int) (*kafka.Metadata, error) {
+			return &kafka.Metadata{}, nil
+		},
+	}
+
+	producer := &Producer{
+		client:           mock,
+		name:             "orders-producer",
+		readinessTimeout: time.Second,
+	}
+
+	if producer.Name() != "orders-producer" {
+		t.Fatalf("unexpected name: %s", producer.Name())
+	}
+	if !producer.IsReady() {
+		t.Fatal("expected producer to be ready")
 	}
 }
 

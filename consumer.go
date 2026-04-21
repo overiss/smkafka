@@ -22,9 +22,11 @@ type Batch struct {
 
 type Consumer struct {
 	client           consumerClient
+	name             string
 	defaultMaxSize   int
 	defaultBatchWait time.Duration
 	reconnectWait    time.Duration
+	readinessTimeout time.Duration
 
 	mu           sync.Mutex
 	lastBatchRaw []*kafka.Message
@@ -65,12 +67,37 @@ func NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 		reconnectWait = defaultReconnectWait
 	}
 
+	name := cfg.Name
+	if name == "" {
+		name = "smkafka-consumer"
+	}
+
+	readinessTimeout := cfg.ReadinessTimeout
+	if readinessTimeout <= 0 {
+		readinessTimeout = defaultReadinessTimeout
+	}
+
 	return &Consumer{
 		client:           client,
+		name:             name,
 		defaultMaxSize:   defaultMaxSize,
 		defaultBatchWait: defaultBatchWait,
 		reconnectWait:    reconnectWait,
+		readinessTimeout: readinessTimeout,
 	}, nil
+}
+
+func (c *Consumer) Name() string {
+	return c.name
+}
+
+func (c *Consumer) IsReady() bool {
+	timeoutMs := int(c.readinessTimeout.Milliseconds())
+	if timeoutMs <= 0 {
+		timeoutMs = int(defaultReadinessTimeout.Milliseconds())
+	}
+	_, err := c.client.GetMetadata(nil, false, timeoutMs)
+	return err == nil
 }
 
 func (c *Consumer) Consume(ctx context.Context) ([]byte, error) {

@@ -30,12 +30,14 @@ go get github.com/overiss/smkafka
 
 ```go
 producer, err := smkafka.NewProducer(smkafka.ProducerConfig{
+	Name:  "orders-producer",
 	Topic: "orders.events",
 	Common: smkafka.CommonConfig{
 		Hosts:            []string{"localhost:9092"},
 		SecurityProtocol: smkafka.SecurityProtocolPlaintext,
 	},
-	ClientID: "orders-producer",
+	ReadinessTimeout: 2 * time.Second,
+	ClientID:         "orders-producer",
 })
 if err != nil {
 	log.Fatal(err)
@@ -74,6 +76,7 @@ if err != nil {
 
 ```go
 consumer, err := smkafka.NewConsumer(smkafka.ConsumerConfig{
+	Name:  "orders-consumer",
 	Topic: "orders.events",
 	GroupID:         "orders-worker",
 	AutoOffsetReset: "earliest",
@@ -83,6 +86,7 @@ consumer, err := smkafka.NewConsumer(smkafka.ConsumerConfig{
 	},
 	BatchSize:     100,
 	BatchDeadline: 5 * time.Second,
+	ReadinessTimeout: 2 * time.Second,
 	ReconnectTimeout: 5 * time.Second,
 	ClientID:      "orders-consumer",
 })
@@ -102,6 +106,16 @@ if err != nil {
 
 // message имеет тип []byte
 _ = message
+```
+
+### Probe-методы
+
+```go
+name := consumer.Name()   // "orders-consumer"
+ready := consumer.IsReady() // true/false
+
+_ = name
+_ = ready
 ```
 
 ### 3) Прочитайте батч (`ConsumeBatch`)
@@ -130,10 +144,11 @@ if err := consumer.CommitBatch(); err != nil {
 ## Ключевые типы API
 
 - `CommonConfig` — общий конфиг подключения (`Hosts`, `SecurityProtocol`, `SASLMechanism`, `Username`, `Password`, сертификаты)
-- `ProducerConfig` — конфиг продюсера (`Topic`, `Common`, `ClientID`, `Partition`, `Overrides`)
-- `ConsumerConfig` — конфиг консьюмера (`Topic`, `GroupID`, `AutoOffsetReset`, `BatchSize`, `BatchDeadline`, `ReconnectTimeout`, `Common`, `Overrides`)
+- `ProducerConfig` — конфиг продюсера (`Name`, `Topic`, `Common`, `ReadinessTimeout`, `ClientID`, `Partition`, `Overrides`)
+- `ConsumerConfig` — конфиг консьюмера (`Name`, `Topic`, `GroupID`, `AutoOffsetReset`, `BatchSize`, `BatchDeadline`, `ReconnectTimeout`, `ReadinessTimeout`, `Common`, `Overrides`)
 - `Producer` — `Produce`, `ProduceMany`, `Flush`, `Close`
 - `Consumer` — `Consume`, `ConsumeBatch`, `CommitBatch`, `Commit`, `Close`
+- readiness API — `Name() string`, `IsReady() bool` у `Producer` и `Consumer`
 - Константы для безопасной настройки: `SecurityProtocol*`, `SASLMechanism*`
 
 ## SSL/SASL и сертификаты
