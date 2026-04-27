@@ -6,7 +6,7 @@
 
 - создавать `Producer` и `Consumer` как независимые сущности;
 - на этапе инициализации задавать понятный конфиг (`hosts`, `security protocol`, `username/password`, сертификаты);
-- в рабочем коде оперировать простыми методами (`context` + `[]byte`), без Kafka-типов.
+- в рабочем коде оперировать простыми методами (`context` + `key []byte` + `message []byte`), без Kafka-типов.
 
 ## Возможности
 
@@ -49,7 +49,8 @@ defer producer.Close()
 
 ```go
 ctx := context.Background()
-err = producer.Produce(ctx, []byte(`{"order_id":123}`))
+key := []byte("order-123")
+err = producer.Produce(ctx, key, []byte(`{"order_id":123}`))
 if err != nil {
 	log.Fatal(err)
 }
@@ -64,7 +65,7 @@ messages := [][]byte{
 	[]byte(`{"order_id":126}`),
 }
 
-err = producer.ProduceMany(ctx, messages)
+err = producer.ProduceMany(ctx, key, messages)
 if err != nil {
 	log.Fatal(err)
 }

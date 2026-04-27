@@ -31,9 +31,13 @@ func (m *mockProducerClient) Close() {}
 
 func TestProducerProduceManySuccess(t *testing.T) {
 	var produced int
+	key := []byte("order-key")
 	mock := &mockProducerClient{
-		produceFn: func(_ *kafka.Message, deliveryChan chan kafka.Event) error {
+		produceFn: func(msg *kafka.Message, deliveryChan chan kafka.Event) error {
 			produced++
+			if string(msg.Key) != string(key) {
+				t.Fatalf("expected key %q, got %q", key, msg.Key)
+			}
 			deliveryChan <- &kafka.Message{}
 			return nil
 		},
@@ -45,7 +49,7 @@ func TestProducerProduceManySuccess(t *testing.T) {
 		partition: PartitionAny,
 	}
 
-	err := producer.ProduceMany(context.Background(), [][]byte{[]byte("a"), []byte("b")})
+	err := producer.ProduceMany(context.Background(), key, [][]byte{[]byte("a"), []byte("b")})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,7 +94,7 @@ func TestProducerProduceManyQueueError(t *testing.T) {
 		partition: PartitionAny,
 	}
 
-	err := producer.ProduceMany(context.Background(), [][]byte{[]byte("a")})
+	err := producer.ProduceMany(context.Background(), []byte("order-key"), [][]byte{[]byte("a")})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

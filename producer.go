@@ -72,11 +72,11 @@ func (p *Producer) IsReady() bool {
 	return err == nil
 }
 
-func (p *Producer) Produce(ctx context.Context, message []byte) error {
-	return p.produceOne(ctx, message)
+func (p *Producer) Produce(ctx context.Context, key, message []byte) error {
+	return p.produceOne(ctx, key, message)
 }
 
-func (p *Producer) ProduceMany(ctx context.Context, messages [][]byte) error {
+func (p *Producer) ProduceMany(ctx context.Context, key []byte, messages [][]byte) error {
 	if len(messages) == 0 {
 		return nil
 	}
@@ -89,6 +89,7 @@ func (p *Producer) ProduceMany(ctx context.Context, messages [][]byte) error {
 				Topic:     &p.topic,
 				Partition: p.partition,
 			},
+			Key:   key,
 			Value: message,
 		}, deliveryChan)
 		if err != nil {
@@ -115,7 +116,7 @@ func (p *Producer) ProduceMany(ctx context.Context, messages [][]byte) error {
 	return nil
 }
 
-func (p *Producer) produceOne(ctx context.Context, message []byte) error {
+func (p *Producer) produceOne(ctx context.Context, key, message []byte) error {
 	deliveryChan := make(chan kafka.Event, 1)
 
 	err := p.client.Produce(&kafka.Message{
@@ -123,6 +124,7 @@ func (p *Producer) produceOne(ctx context.Context, message []byte) error {
 			Topic:     &p.topic,
 			Partition: p.partition,
 		},
+		Key:   key,
 		Value: message,
 	}, deliveryChan)
 	if err != nil {
