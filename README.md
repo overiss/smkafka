@@ -6,7 +6,7 @@
 
 - создавать `Producer` и `Consumer` как независимые сущности;
 - на этапе инициализации задавать понятный конфиг (`hosts`, `security protocol`, `username/password`, сертификаты);
-- в рабочем коде оперировать простыми методами (`context` + `key []byte` + `message []byte`), без Kafka-типов.
+- в рабочем коде оперировать простыми методами (`context` + `Message` / `key []byte` + `[]byte`), без Kafka-типов.
 
 ## Возможности
 
@@ -105,8 +105,10 @@ if err != nil {
 	log.Fatal(err)
 }
 
-// message имеет тип []byte
-_ = message
+// message: Key, Value, Headers
+_ = message.Key
+_ = message.Value
+_ = message.Headers
 ```
 
 ### Probe-методы
@@ -124,13 +126,15 @@ _ = ready
 Батч читается либо до заполнения, либо до истечения `BatchDeadline` (из `ConsumerConfig`).
 
 ```go
-batch, err := consumer.ConsumeBatch(ctx)
+messages, err := consumer.ConsumeBatch(ctx)
 if err != nil {
 	log.Fatal(err)
 }
 
-for _, message := range batch.Messages {
-	_ = message // []byte
+for _, message := range messages {
+	_ = message.Key
+	_ = message.Value
+	_ = message.Headers
 }
 ```
 
@@ -148,6 +152,8 @@ if err := consumer.CommitBatch(); err != nil {
 - `ProducerConfig` — конфиг продюсера (`Name`, `Topic`, `Common`, `ReadinessTimeout`, `ClientID`, `Partition`, `Overrides`)
 - `ConsumerConfig` — конфиг консьюмера (`Name`, `Topic`, `GroupID`, `AutoOffsetReset`, `BatchSize`, `BatchDeadline`, `ReconnectTimeout`, `ReadinessTimeout`, `Common`, `Overrides`)
 - `Producer` — `Produce`, `ProduceMany`, `Flush`, `Close`
+- `Message` — прочитанное сообщение (`Key`, `Value`, `Headers`)
+- `Header` — один заголовок сообщения (`Key`, `Value`)
 - `Consumer` — `Consume`, `ConsumeBatch`, `CommitBatch`, `Commit`, `Close`
 - readiness API — `Name() string`, `IsReady() bool` у `Producer` и `Consumer`
 - Константы для безопасной настройки: `SecurityProtocol*`, `SASLMechanism*`

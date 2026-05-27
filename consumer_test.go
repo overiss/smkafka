@@ -145,6 +145,44 @@ func TestConsumerCommitBatchRestoresBatchOnFailure(t *testing.T) {
 	}
 }
 
+func TestMessageFromKafka(t *testing.T) {
+	msg := messageFromKafka(&kafka.Message{
+		Key:   []byte("order-key"),
+		Value: []byte("payload"),
+		Headers: []kafka.Header{
+			{Key: "trace-id", Value: []byte("abc")},
+		},
+	})
+
+	if string(msg.Key) != "order-key" {
+		t.Fatalf("unexpected key: %q", msg.Key)
+	}
+	if string(msg.Value) != "payload" {
+		t.Fatalf("unexpected value: %q", msg.Value)
+	}
+	if len(msg.Headers) != 1 {
+		t.Fatalf("expected 1 header, got %d", len(msg.Headers))
+	}
+	if msg.Headers[0].Key != "trace-id" || string(msg.Headers[0].Value) != "abc" {
+		t.Fatalf("unexpected header: %+v", msg.Headers[0])
+	}
+
+	msg.Key[0] = 'X'
+	msg.Value[0] = 'Y'
+	msg.Headers[0].Value[0] = 'Z'
+
+	original := &kafka.Message{
+		Key:   []byte("order-key"),
+		Value: []byte("payload"),
+		Headers: []kafka.Header{
+			{Key: "trace-id", Value: []byte("abc")},
+		},
+	}
+	if original.Key[0] != 'o' || original.Value[0] != 'p' || original.Headers[0].Value[0] != 'a' {
+		t.Fatal("expected copied slices, not shared backing arrays")
+	}
+}
+
 func TestConsumerReadiness(t *testing.T) {
 	mock := &mockConsumerClient{
 		commitFn:          func() ([]kafka.TopicPartition, error) { return nil, nil },

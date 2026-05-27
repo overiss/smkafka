@@ -16,8 +16,15 @@ const (
 	defaultReconnectWait = 5 * time.Second
 )
 
-type Batch struct {
-	Messages [][]byte
+type Header struct {
+	Key   string
+	Value []byte
+}
+
+type Message struct {
+	Key     []byte
+	Value   []byte
+	Headers []Header
 }
 
 type Consumer struct {
@@ -100,10 +107,10 @@ func (c *Consumer) IsReady() bool {
 	return err == nil
 }
 
-func (c *Consumer) Consume(ctx context.Context) ([]byte, error) {
+func (c *Consumer) Consume(ctx context.Context) (Message, error) {
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return Message{}, err
 		}
 
 		event := c.client.Poll(200)
@@ -113,28 +120,27 @@ func (c *Consumer) Consume(ctx context.Context) ([]byte, error) {
 
 		switch e := event.(type) {
 		case *kafka.Message:
-			return e.Value, nil
+			return messageFromKafka(e), nil
 		case kafka.Error:
 			if e.Code() == kafka.ErrAssignmentLost {
 				continue
 			}
-			return nil, fmt.Errorf("consume event: %w", e)
+			return Message{}, fmt.Errorf("consume event: %w", e)
 		case kafka.PartitionEOF:
 			continue
 		}
 	}
 }
 
-func (c *Consumer) ConsumeBatch(ctx context.Context) (Batch, error) {
+func (c *Consumer) ConsumeBatch(ctx context.Context) ([]Message, error) {
 	deadline := time.Now().Add(c.defaultBatchWait)
 	rawMessages := make([]*kafka.Message, 0, c.defaultMaxSize)
-	messages := make([][]byte, 0, c.defaultMaxSize)
+	messages := make([]Message, 0, c.defaultMaxSize)
 
 	for len(rawMessages) < c.defaultMaxSize {
 		if err := ctx.Err(); err != nil {
-			batch := Batch{Messages: messages}
 			c.setLastBatch(rawMessages)
-			return batch, err
+			return messages, err
 		}
 
 		remaining := time.Until(deadline)
@@ -151,21 +157,39 @@ func (c *Consumer) ConsumeBatch(ctx context.Context) (Batch, error) {
 		switch e := event.(type) {
 		case *kafka.Message:
 			rawMessages = append(rawMessages, e)
-			messages = append(messages, e.Value)
+			messages = append(messages, messageFromKafka(e))
 		case kafka.Error:
 			if e.Code() == kafka.ErrAssignmentLost {
 				continue
 			}
-			batch := Batch{Messages: messages}
 			c.setLastBatch(rawMessages)
-			return batch, fmt.Errorf("consume event: %w", e)
+			return messages, fmt.Errorf("consume event: %w", e)
 		case kafka.PartitionEOF:
 			continue
 		}
 	}
 
 	c.setLastBatch(rawMessages)
-	return Batch{Messages: messages}, nil
+	return messages, nil
+}
+
+func messageFromKafka(msg *kafka.Message) Message {
+	key := append([]byte(nil), msg.Key...)
+	value := append([]byte(nil), msg.Value...)
+
+	headers := make([]Header, len(msg.Headers))
+	for i, header := range msg.Headers {
+		headers[i] = Header{
+			Key:   header.Key,
+			Value: append([]byte(nil), header.Value...),
+		}
+	}
+
+	return Message{
+		Key:     key,
+		Value:   value,
+		Headers: headers,
+	}
 }
 
 func (c *Consumer) Commit() error {
