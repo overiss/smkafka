@@ -136,13 +136,15 @@ func commonKafkaConfig(cfg CommonConfig) (kafka.ConfigMap, error) {
 		m["sasl.mechanism"] = mechanism
 	}
 
-	if upperProtocol == "SASL_SSL" {
-		if cfg.CaLocation == "" || cfg.CertLocation == "" {
-			return nil, fmt.Errorf("CaLocation [%s] or CertLocation [%s] is not set", cfg.CaLocation, cfg.CertLocation)
+	if upperProtocol == "SSL" || upperProtocol == "SASL_SSL" {
+		if cfg.CaLocation == "" {
+			return nil, fmt.Errorf("CaLocation must be set for security protocol %s", protocol)
 		}
 
-		m["ssl.certificate.location"] = cfg.CertLocation
 		m["ssl.ca.location"] = cfg.CaLocation
+		if cfg.CertLocation != "" {
+			m["ssl.certificate.location"] = cfg.CertLocation
+		}
 		if cfg.KeyLocation != "" {
 			m["ssl.key.location"] = cfg.KeyLocation
 		}

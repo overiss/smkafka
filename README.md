@@ -160,13 +160,29 @@ if err := consumer.CommitBatch(); err != nil {
 
 ## SSL/SASL и сертификаты
 
-Если выбран `SecurityProtocol: "SASL_SSL"`, библиотека проверяет сертификаты:
+Поля `CommonConfig`:
 
-- `CaLocation` и `CertLocation` обязательны;
-- если не заданы, конструктор вернет ошибку;
-- `KeyLocation` опционален и будет добавлен в Kafka-конфиг, если указан.
+- `CaLocation` — trust store (CA bundle) для проверки сертификата брокера, не client cert;
+- `CertLocation` — опциональный client certificate (`ssl.certificate.location`);
+- `KeyLocation` — опциональный приватный ключ client certificate (`ssl.key.location`).
 
-Пример:
+Для `SecurityProtocol: "SSL"` и `"SASL_SSL"` обязателен только `CaLocation`.
+Если заданы `CertLocation` и/или `KeyLocation`, они прокидываются в Kafka-конфиг.
+
+Пример `SASL_SSL` только с trust store:
+
+```go
+common := smkafka.CommonConfig{
+	Hosts:            []string{"kafka-1:9093", "kafka-2:9093"},
+	SecurityProtocol: smkafka.SecurityProtocolSASLSSL,
+	SASLMechanism:    smkafka.SASLMechanismPlain,
+	Username:         "my-user",
+	Password:         "my-pass",
+	CaLocation:       "/etc/certs/ca.pem",
+}
+```
+
+Пример `SASL_SSL` с mutual TLS (client cert):
 
 ```go
 common := smkafka.CommonConfig{
@@ -178,6 +194,16 @@ common := smkafka.CommonConfig{
 	CaLocation:       "/etc/certs/ca.pem",
 	CertLocation:     "/etc/certs/client.pem",
 	KeyLocation:      "/etc/certs/client.key",
+}
+```
+
+Пример `SSL` без SASL:
+
+```go
+common := smkafka.CommonConfig{
+	Hosts:            []string{"kafka-1:9093", "kafka-2:9093"},
+	SecurityProtocol: smkafka.SecurityProtocolSSL,
+	CaLocation:       "/etc/certs/ca.pem",
 }
 ```
 
