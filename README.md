@@ -24,17 +24,39 @@
 go get github.com/overiss/smkafka
 ```
 
+## Структура пакетов
+
+```
+github.com/overiss/smkafka/
+├── config/    — общий конфиг подключения (Hosts, SSL/SASL, сертификаты)
+├── producer/  — producer API
+├── consumer/  — consumer API
+└── smkafka    — re-export для обратной совместимости (корневой пакет)
+```
+
+Рекомендуемый импорт — из подпакетов:
+
+```go
+import (
+    "github.com/overiss/smkafka/config"
+    "github.com/overiss/smkafka/producer"
+    "github.com/overiss/smkafka/consumer"
+)
+```
+
+Старый импорт `github.com/overiss/smkafka` по-прежнему работает через type aliases.
+
 ## How-To: Producer
 
 ### 1) Создайте producer
 
 ```go
-producer, err := smkafka.NewProducer(smkafka.ProducerConfig{
+producer, err := producer.New(producer.Config{
 	Name:  "orders-producer",
 	Topic: "orders.events",
-	Common: smkafka.CommonConfig{
+	Common: config.Common{
 		Hosts:            []string{"localhost:9092"},
-		SecurityProtocol: smkafka.SecurityProtocolPlaintext,
+		SecurityProtocol: config.SecurityProtocolPlaintext,
 	},
 	ReadinessTimeout: 2 * time.Second,
 	ClientID:         "orders-producer",
@@ -76,14 +98,14 @@ if err != nil {
 ### 1) Создайте consumer
 
 ```go
-consumer, err := smkafka.NewConsumer(smkafka.ConsumerConfig{
+consumer, err := consumer.New(consumer.Config{
 	Name:  "orders-consumer",
 	Topic: "orders.events",
 	GroupID:         "orders-worker",
 	AutoOffsetReset: "earliest",
-	Common: smkafka.CommonConfig{
+	Common: config.Common{
 		Hosts:            []string{"localhost:9092"},
-		SecurityProtocol: smkafka.SecurityProtocolPlaintext,
+		SecurityProtocol: config.SecurityProtocolPlaintext,
 	},
 	BatchSize:     100,
 	BatchDeadline: 5 * time.Second,
@@ -148,19 +170,60 @@ if err := consumer.CommitBatch(); err != nil {
 
 ## Ключевые типы API
 
-- `CommonConfig` — общий конфиг подключения (`Hosts`, `SecurityProtocol`, `SASLMechanism`, `Username`, `Password`, сертификаты)
-- `ProducerConfig` — конфиг продюсера (`Name`, `Topic`, `Common`, `ReadinessTimeout`, `ClientID`, `Partition`, `Overrides`)
-- `ConsumerConfig` — конфиг консьюмера (`Name`, `Topic`, `GroupID`, `AutoOffsetReset`, `BatchSize`, `BatchDeadline`, `ReconnectTimeout`, `ReadinessTimeout`, `Common`, `Overrides`)
-- `Producer` — `Produce`, `ProduceMany`, `Flush`, `Close`
-- `Message` — прочитанное сообщение (`Key`, `Value`, `Headers`)
-- `Header` — один заголовок сообщения (`Key`, `Value`)
-- `Consumer` — `Consume`, `ConsumeBatch`, `CommitBatch`, `Commit`, `Close`
+- `config.Common` — общий конфиг подключения (`Hosts`, `SecurityProtocol`, `SASLMechanism`, `Username`, `Password`, сертификаты)
+- `producer.Config` — конфиг продюсера (`Name`, `Topic`, `Common`, `ReadinessTimeout`, `ClientID`, `Partition`, `Hooks`, `Overrides`)
+- `consumer.Config` — конфиг консьюмера (`Name`, `Topic`, `GroupID`, `AutoOffsetReset`, `BatchSize`, `BatchDeadline`, `ReconnectTimeout`, `ReadinessTimeout`, `Common`, `Hooks`, `Overrides`)
+- `producer.Producer` — `Produce`, `ProduceMany`, `Flush`, `Close`
+- `consumer.Message` — прочитанное сообщение (`Key`, `Value`, `Headers`)
+- `consumer.Header` — один заголовок сообщения (`Key`, `Value`)
+- `consumer.Consumer` — `Consume`, `ConsumeBatch`, `CommitBatch`, `Commit`, `Close`
 - readiness API — `Name() string`, `IsReady() bool` у `Producer` и `Consumer`
 - Константы для безопасной настройки: `SecurityProtocol*`, `SASLMechanism*`
 
+## Hooks для метрик
+
+В `producer.Config.Hooks` и `consumer.Config.Hooks` можно задать колбэки, которые вызываются после завершения операции с её длительностью и ошибкой:
+
+- `OnProduce`, `OnProduceMany`
+- `OnCommit`, `OnConsume`, `OnConsumeBatch`
+
+Пример:
+
+```go
+producer, err := producer.New(producer.Config{
+	Topic: "orders.events",
+	Common: config.Common{
+		Hosts: []string{"localhost:9092"},
+	},
+	Hooks: producer.Hooks{
+		OnProduce: func(duration time.Duration, err error) {
+			// ordersProducerLatency.Observe(duration.Seconds())
+			// ordersProducerErrors.Inc() if err != nil
+		},
+	},
+})
+```
+
+```go
+consumer, err := consumer.New(consumer.Config{
+	Topic:   "orders.events",
+	GroupID: "orders-worker",
+	Common: config.Common{
+		Hosts: []string{"localhost:9092"},
+	},
+	Hooks: consumer.Hooks{
+		OnConsumeBatch: func(duration time.Duration, err error) {
+			// consumerBatchLatency.Observe(duration.Seconds())
+		},
+	},
+})
+```
+
+Хук вызывается один раз на вызов метода, включая retry внутри `Commit` после `AssignmentLost`.
+
 ## SSL/SASL и сертификаты
 
-Поля `CommonConfig`:
+Поля `config.Common`:
 
 - `CaLocation` — trust store (CA bundle) для проверки сертификата брокера, не client cert;
 - `CertLocation` — опциональный client certificate (`ssl.certificate.location`);
@@ -172,10 +235,10 @@ if err := consumer.CommitBatch(); err != nil {
 Пример `SASL_SSL` только с trust store:
 
 ```go
-common := smkafka.CommonConfig{
+common := config.Common{
 	Hosts:            []string{"kafka-1:9093", "kafka-2:9093"},
-	SecurityProtocol: smkafka.SecurityProtocolSASLSSL,
-	SASLMechanism:    smkafka.SASLMechanismPlain,
+	SecurityProtocol: config.SecurityProtocolSASLSSL,
+	SASLMechanism:    config.SASLMechanismPlain,
 	Username:         "my-user",
 	Password:         "my-pass",
 	CaLocation:       "/etc/certs/ca.pem",
@@ -185,10 +248,10 @@ common := smkafka.CommonConfig{
 Пример `SASL_SSL` с mutual TLS (client cert):
 
 ```go
-common := smkafka.CommonConfig{
+common := config.Common{
 	Hosts:            []string{"kafka-1:9093", "kafka-2:9093"},
-	SecurityProtocol: smkafka.SecurityProtocolSASLSSL,
-	SASLMechanism:    smkafka.SASLMechanismPlain,
+	SecurityProtocol: config.SecurityProtocolSASLSSL,
+	SASLMechanism:    config.SASLMechanismPlain,
 	Username:         "my-user",
 	Password:         "my-pass",
 	CaLocation:       "/etc/certs/ca.pem",
@@ -200,9 +263,9 @@ common := smkafka.CommonConfig{
 Пример `SSL` без SASL:
 
 ```go
-common := smkafka.CommonConfig{
+common := config.Common{
 	Hosts:            []string{"kafka-1:9093", "kafka-2:9093"},
-	SecurityProtocol: smkafka.SecurityProtocolSSL,
+	SecurityProtocol: config.SecurityProtocolSSL,
 	CaLocation:       "/etc/certs/ca.pem",
 }
 ```

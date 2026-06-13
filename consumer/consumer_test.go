@@ -1,6 +1,7 @@
-package smkafka
+package consumer
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -8,7 +9,7 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
-type mockConsumerClient struct {
+type mockClient struct {
 	commitFn          func() ([]kafka.TopicPartition, error)
 	commitOffsetsFn   func(offsets []kafka.TopicPartition) ([]kafka.TopicPartition, error)
 	assignmentFn      func() ([]kafka.TopicPartition, error)
@@ -17,46 +18,46 @@ type mockConsumerClient struct {
 	resumeFn          func(partitions []kafka.TopicPartition) error
 }
 
-func (m *mockConsumerClient) Poll(_ int) kafka.Event { return nil }
+func (m *mockClient) Poll(_ int) kafka.Event { return nil }
 
-func (m *mockConsumerClient) Commit() ([]kafka.TopicPartition, error) {
+func (m *mockClient) Commit() ([]kafka.TopicPartition, error) {
 	return m.commitFn()
 }
 
-func (m *mockConsumerClient) CommitOffsets(offsets []kafka.TopicPartition) ([]kafka.TopicPartition, error) {
+func (m *mockClient) CommitOffsets(offsets []kafka.TopicPartition) ([]kafka.TopicPartition, error) {
 	return m.commitOffsetsFn(offsets)
 }
 
-func (m *mockConsumerClient) Assignment() ([]kafka.TopicPartition, error) {
+func (m *mockClient) Assignment() ([]kafka.TopicPartition, error) {
 	return m.assignmentFn()
 }
 
-func (m *mockConsumerClient) OffsetsForTimes(times []kafka.TopicPartition, timeoutMs int) ([]kafka.TopicPartition, error) {
+func (m *mockClient) OffsetsForTimes(times []kafka.TopicPartition, timeoutMs int) ([]kafka.TopicPartition, error) {
 	return m.offsetsForTimesFn(times, timeoutMs)
 }
 
-func (m *mockConsumerClient) GetMetadata(topic *string, allTopics bool, timeoutMs int) (*kafka.Metadata, error) {
+func (m *mockClient) GetMetadata(topic *string, allTopics bool, timeoutMs int) (*kafka.Metadata, error) {
 	if m.metadataFn == nil {
 		return &kafka.Metadata{}, nil
 	}
 	return m.metadataFn(topic, allTopics, timeoutMs)
 }
 
-func (m *mockConsumerClient) Resume(partitions []kafka.TopicPartition) error {
+func (m *mockClient) Resume(partitions []kafka.TopicPartition) error {
 	return m.resumeFn(partitions)
 }
 
-func (m *mockConsumerClient) SubscribeTopics(_ []string, _ kafka.RebalanceCb) error { return nil }
+func (m *mockClient) SubscribeTopics(_ []string, _ kafka.RebalanceCb) error { return nil }
 
-func (m *mockConsumerClient) Close() error { return nil }
+func (m *mockClient) Close() error { return nil }
 
-func TestConsumerCommitBatchReconnectRetry(t *testing.T) {
+func TestCommitBatchReconnectRetry(t *testing.T) {
 	topic := "topic"
 	assignments := []kafka.TopicPartition{{Topic: &topic, Partition: 0}}
 	commitOffsetsCalls := 0
 	resumeCalls := 0
 
-	mock := &mockConsumerClient{
+	mock := &mockClient{
 		commitFn: func() ([]kafka.TopicPartition, error) { return nil, nil },
 		commitOffsetsFn: func(_ []kafka.TopicPartition) ([]kafka.TopicPartition, error) {
 			commitOffsetsCalls++
@@ -83,11 +84,11 @@ func TestConsumerCommitBatchReconnectRetry(t *testing.T) {
 		},
 	}
 
-	consumer := &Consumer{
+	c := &Consumer{
 		client:        mock,
 		reconnectWait: time.Second,
 	}
-	consumer.setLastBatch([]*kafka.Message{
+	c.setLastBatch([]*kafka.Message{
 		{
 			TopicPartition: kafka.TopicPartition{
 				Topic:     &topic,
@@ -97,7 +98,7 @@ func TestConsumerCommitBatchReconnectRetry(t *testing.T) {
 		},
 	})
 
-	err := consumer.CommitBatch()
+	err := c.CommitBatch()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,15 +108,15 @@ func TestConsumerCommitBatchReconnectRetry(t *testing.T) {
 	if resumeCalls != 1 {
 		t.Fatalf("expected 1 reconnect resume, got %d", resumeCalls)
 	}
-	if batch := consumer.takeLastBatch(); len(batch) != 0 {
+	if batch := c.takeLastBatch(); len(batch) != 0 {
 		t.Fatalf("expected batch to be cleared, got len=%d", len(batch))
 	}
 }
 
-func TestConsumerCommitBatchRestoresBatchOnFailure(t *testing.T) {
+func TestCommitBatchRestoresBatchOnFailure(t *testing.T) {
 	topic := "topic"
 	expectedErr := errors.New("commit failed")
-	mock := &mockConsumerClient{
+	mock := &mockClient{
 		commitFn: func() ([]kafka.TopicPartition, error) { return nil, nil },
 		commitOffsetsFn: func(_ []kafka.TopicPartition) ([]kafka.TopicPartition, error) {
 			return nil, expectedErr
@@ -125,8 +126,8 @@ func TestConsumerCommitBatchRestoresBatchOnFailure(t *testing.T) {
 		resumeFn:          func(_ []kafka.TopicPartition) error { return nil },
 	}
 
-	consumer := &Consumer{client: mock, reconnectWait: time.Second}
-	consumer.setLastBatch([]*kafka.Message{
+	c := &Consumer{client: mock, reconnectWait: time.Second}
+	c.setLastBatch([]*kafka.Message{
 		{
 			TopicPartition: kafka.TopicPartition{
 				Topic:     &topic,
@@ -136,11 +137,11 @@ func TestConsumerCommitBatchRestoresBatchOnFailure(t *testing.T) {
 		},
 	})
 
-	err := consumer.CommitBatch()
+	err := c.CommitBatch()
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if batch := consumer.takeLastBatch(); len(batch) != 1 {
+	if batch := c.takeLastBatch(); len(batch) != 1 {
 		t.Fatalf("expected batch restored after error, got len=%d", len(batch))
 	}
 }
@@ -183,8 +184,8 @@ func TestMessageFromKafka(t *testing.T) {
 	}
 }
 
-func TestConsumerReadiness(t *testing.T) {
-	mock := &mockConsumerClient{
+func TestReadiness(t *testing.T) {
+	mock := &mockClient{
 		commitFn:          func() ([]kafka.TopicPartition, error) { return nil, nil },
 		commitOffsetsFn:   func(_ []kafka.TopicPartition) ([]kafka.TopicPartition, error) { return nil, nil },
 		assignmentFn:      func() ([]kafka.TopicPartition, error) { return nil, nil },
@@ -195,16 +196,76 @@ func TestConsumerReadiness(t *testing.T) {
 		resumeFn: func(_ []kafka.TopicPartition) error { return nil },
 	}
 
-	consumer := &Consumer{
+	c := &Consumer{
 		client:           mock,
 		name:             "orders-consumer",
 		readinessTimeout: time.Second,
 	}
 
-	if consumer.Name() != "orders-consumer" {
-		t.Fatalf("unexpected name: %s", consumer.Name())
+	if c.Name() != "orders-consumer" {
+		t.Fatalf("unexpected name: %s", c.Name())
 	}
-	if !consumer.IsReady() {
+	if !c.IsReady() {
 		t.Fatal("expected consumer to be ready")
+	}
+}
+
+func TestHooks(t *testing.T) {
+	expectedErr := errors.New("commit failed")
+
+	mock := &mockClient{
+		commitFn: func() ([]kafka.TopicPartition, error) {
+			return nil, expectedErr
+		},
+		commitOffsetsFn:   func(_ []kafka.TopicPartition) ([]kafka.TopicPartition, error) { return nil, nil },
+		assignmentFn:      func() ([]kafka.TopicPartition, error) { return nil, nil },
+		offsetsForTimesFn: func(times []kafka.TopicPartition, _ int) ([]kafka.TopicPartition, error) { return times, nil },
+		resumeFn:          func(_ []kafka.TopicPartition) error { return nil },
+	}
+
+	c := &Consumer{
+		client:           mock,
+		defaultMaxSize:   defaultBatchSize,
+		defaultBatchWait: defaultBatchDeadline,
+		hooks: Hooks{
+			OnCommit: func(duration time.Duration, err error) {
+				if duration < 0 {
+					t.Fatal("expected non-negative duration")
+				}
+				if !errors.Is(err, expectedErr) {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			},
+			OnConsume: func(duration time.Duration, err error) {
+				if duration < 0 {
+					t.Fatal("expected non-negative duration")
+				}
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			},
+			OnConsumeBatch: func(duration time.Duration, err error) {
+				if duration < 0 {
+					t.Fatal("expected non-negative duration")
+				}
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			},
+		},
+	}
+
+	if err := c.Commit(); !errors.Is(err, expectedErr) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := c.Consume(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := c.ConsumeBatch(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

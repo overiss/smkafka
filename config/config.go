@@ -1,9 +1,8 @@
-package smkafka
+package config
 
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
@@ -25,7 +24,7 @@ const (
 	SASLMechanismSCRAMSHA512 SASLMechanism = "SCRAM-SHA-512"
 )
 
-type CommonConfig struct {
+type Common struct {
 	Hosts            []string
 	Username         string
 	Password         string
@@ -36,76 +35,7 @@ type CommonConfig struct {
 	KeyLocation      string
 }
 
-type ProducerConfig struct {
-	Common           CommonConfig
-	Name             string
-	Topic            string
-	Partition        *int32
-	ReadinessTimeout time.Duration
-	ClientID         string
-	Overrides        map[string]any
-}
-
-type ConsumerConfig struct {
-	Common           CommonConfig
-	Name             string
-	Topic            string
-	GroupID          string
-	AutoOffsetReset  string
-	EnableAutoCommit *bool
-	BatchSize        int
-	BatchDeadline    time.Duration
-	ReconnectTimeout time.Duration
-	ReadinessTimeout time.Duration
-	ClientID         string
-	Overrides        map[string]any
-}
-
-func producerKafkaConfig(cfg ProducerConfig) (kafka.ConfigMap, error) {
-	result, err := commonKafkaConfig(cfg.Common)
-	if err != nil {
-		return nil, err
-	}
-
-	if cfg.ClientID != "" {
-		result["client.id"] = cfg.ClientID
-	}
-
-	applyOverrides(result, cfg.Overrides)
-	return result, nil
-}
-
-func consumerKafkaConfig(cfg ConsumerConfig) (kafka.ConfigMap, error) {
-	result, err := commonKafkaConfig(cfg.Common)
-	if err != nil {
-		return nil, err
-	}
-
-	if cfg.GroupID == "" {
-		return nil, fmt.Errorf("group id must not be empty")
-	}
-	result["group.id"] = cfg.GroupID
-
-	if cfg.AutoOffsetReset != "" {
-		result["auto.offset.reset"] = cfg.AutoOffsetReset
-	}
-
-	if cfg.EnableAutoCommit != nil {
-		result["enable.auto.commit"] = *cfg.EnableAutoCommit
-	} else {
-		// Library exposes explicit commit methods, so auto commit is disabled by default.
-		result["enable.auto.commit"] = false
-	}
-
-	if cfg.ClientID != "" {
-		result["client.id"] = cfg.ClientID
-	}
-
-	applyOverrides(result, cfg.Overrides)
-	return result, nil
-}
-
-func commonKafkaConfig(cfg CommonConfig) (kafka.ConfigMap, error) {
+func KafkaConfig(cfg Common) (kafka.ConfigMap, error) {
 	if len(cfg.Hosts) == 0 {
 		return nil, fmt.Errorf("hosts must not be empty")
 	}
@@ -153,7 +83,7 @@ func commonKafkaConfig(cfg CommonConfig) (kafka.ConfigMap, error) {
 	return m, nil
 }
 
-func applyOverrides(target kafka.ConfigMap, overrides map[string]any) {
+func ApplyOverrides(target kafka.ConfigMap, overrides map[string]any) {
 	for key, value := range overrides {
 		target[key] = value
 	}

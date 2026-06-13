@@ -1,4 +1,4 @@
-package smkafka
+package producer
 
 import (
 	"context"
@@ -7,30 +7,31 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/overiss/smkafka/internal/shared"
 )
 
 const PartitionAny int32 = kafka.PartitionAny
-const defaultReadinessTimeout = 3 * time.Second
 
 type Producer struct {
-	client           producerClient
+	client           client
 	name             string
 	topic            string
 	partition        int32
 	readinessTimeout time.Duration
+	hooks            Hooks
 }
 
-func NewProducer(cfg ProducerConfig) (*Producer, error) {
+func New(cfg Config) (*Producer, error) {
 	if cfg.Topic == "" {
 		return nil, errors.New("producer topic must not be empty")
 	}
 
-	kafkaCfg, err := producerKafkaConfig(cfg)
+	kafkaCfg, err := kafkaConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("build producer config: %w", err)
 	}
 
-	client, err := kafka.NewProducer(&kafkaCfg)
+	c, err := kafka.NewProducer(&kafkaCfg)
 	if err != nil {
 		return nil, fmt.Errorf("create kafka producer: %w", err)
 	}
@@ -47,15 +48,16 @@ func NewProducer(cfg ProducerConfig) (*Producer, error) {
 
 	readinessTimeout := cfg.ReadinessTimeout
 	if readinessTimeout <= 0 {
-		readinessTimeout = defaultReadinessTimeout
+		readinessTimeout = shared.DefaultReadinessTimeout
 	}
 
 	return &Producer{
-		client:           client,
+		client:           c,
 		name:             name,
 		topic:            cfg.Topic,
 		partition:        partition,
 		readinessTimeout: readinessTimeout,
+		hooks:            cfg.Hooks,
 	}, nil
 }
 
@@ -66,17 +68,23 @@ func (p *Producer) Name() string {
 func (p *Producer) IsReady() bool {
 	timeoutMs := int(p.readinessTimeout.Milliseconds())
 	if timeoutMs <= 0 {
-		timeoutMs = int(defaultReadinessTimeout.Milliseconds())
+		timeoutMs = int(shared.DefaultReadinessTimeout.Milliseconds())
 	}
 	_, err := p.client.GetMetadata(nil, false, timeoutMs)
 	return err == nil
 }
 
-func (p *Producer) Produce(ctx context.Context, key, message []byte) error {
+func (p *Producer) Produce(ctx context.Context, key, message []byte) (err error) {
+	start := time.Now()
+	defer func() { shared.CallHook(p.hooks.OnProduce, start, err) }()
+
 	return p.produceOne(ctx, key, message)
 }
 
-func (p *Producer) ProduceMany(ctx context.Context, key []byte, messages [][]byte) error {
+func (p *Producer) ProduceMany(ctx context.Context, key []byte, messages [][]byte) (err error) {
+	start := time.Now()
+	defer func() { shared.CallHook(p.hooks.OnProduceMany, start, err) }()
+
 	if len(messages) == 0 {
 		return nil
 	}

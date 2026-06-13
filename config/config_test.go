@@ -1,9 +1,9 @@
-package smkafka
+package config
 
 import "testing"
 
-func TestCommonKafkaConfigSASLSSLRequiresOnlyCaLocation(t *testing.T) {
-	cfg, err := commonKafkaConfig(CommonConfig{
+func TestKafkaConfigSASLSSLRequiresOnlyCaLocation(t *testing.T) {
+	cfg, err := KafkaConfig(Common{
 		Hosts:            []string{"localhost:9093"},
 		SecurityProtocol: SecurityProtocolSASLSSL,
 		Username:         "user",
@@ -24,8 +24,8 @@ func TestCommonKafkaConfigSASLSSLRequiresOnlyCaLocation(t *testing.T) {
 	}
 }
 
-func TestCommonKafkaConfigSASLSSLWithClientCert(t *testing.T) {
-	cfg, err := commonKafkaConfig(CommonConfig{
+func TestKafkaConfigSASLSSLWithClientCert(t *testing.T) {
+	cfg, err := KafkaConfig(Common{
 		Hosts:            []string{"localhost:9093"},
 		SecurityProtocol: SecurityProtocolSASLSSL,
 		Username:         "user",
@@ -45,8 +45,8 @@ func TestCommonKafkaConfigSASLSSLWithClientCert(t *testing.T) {
 	}
 }
 
-func TestCommonKafkaConfigSSLRequiresCaLocation(t *testing.T) {
-	_, err := commonKafkaConfig(CommonConfig{
+func TestKafkaConfigSSLRequiresCaLocation(t *testing.T) {
+	_, err := KafkaConfig(Common{
 		Hosts:            []string{"localhost:9093"},
 		SecurityProtocol: SecurityProtocolSSL,
 	})
@@ -55,8 +55,8 @@ func TestCommonKafkaConfigSSLRequiresCaLocation(t *testing.T) {
 	}
 }
 
-func TestCommonKafkaConfigSSLWithCaLocation(t *testing.T) {
-	cfg, err := commonKafkaConfig(CommonConfig{
+func TestKafkaConfigSSLWithCaLocation(t *testing.T) {
+	cfg, err := KafkaConfig(Common{
 		Hosts:            []string{"localhost:9093"},
 		SecurityProtocol: SecurityProtocolSSL,
 		CaLocation:       "/etc/certs/ca.pem",

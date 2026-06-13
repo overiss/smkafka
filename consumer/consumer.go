@@ -1,4 +1,4 @@
-package smkafka
+package consumer
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/overiss/smkafka/internal/shared"
 )
 
 const (
@@ -28,34 +29,35 @@ type Message struct {
 }
 
 type Consumer struct {
-	client           consumerClient
+	client           client
 	name             string
 	defaultMaxSize   int
 	defaultBatchWait time.Duration
 	reconnectWait    time.Duration
 	readinessTimeout time.Duration
+	hooks            Hooks
 
 	mu           sync.Mutex
 	lastBatchRaw []*kafka.Message
 }
 
-func NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
+func New(cfg Config) (*Consumer, error) {
 	if cfg.Topic == "" {
 		return nil, errors.New("consumer topic must not be empty")
 	}
 
-	kafkaCfg, err := consumerKafkaConfig(cfg)
+	kafkaCfg, err := kafkaConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("build consumer config: %w", err)
 	}
 
-	client, err := kafka.NewConsumer(&kafkaCfg)
+	c, err := kafka.NewConsumer(&kafkaCfg)
 	if err != nil {
 		return nil, fmt.Errorf("create kafka consumer: %w", err)
 	}
 
-	if err := client.SubscribeTopics([]string{cfg.Topic}, nil); err != nil {
-		client.Close()
+	if err := c.SubscribeTopics([]string{cfg.Topic}, nil); err != nil {
+		c.Close()
 		return nil, fmt.Errorf("subscribe topic %q: %w", cfg.Topic, err)
 	}
 
@@ -81,16 +83,17 @@ func NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 
 	readinessTimeout := cfg.ReadinessTimeout
 	if readinessTimeout <= 0 {
-		readinessTimeout = defaultReadinessTimeout
+		readinessTimeout = shared.DefaultReadinessTimeout
 	}
 
 	return &Consumer{
-		client:           client,
+		client:           c,
 		name:             name,
 		defaultMaxSize:   defaultMaxSize,
 		defaultBatchWait: defaultBatchWait,
 		reconnectWait:    reconnectWait,
 		readinessTimeout: readinessTimeout,
+		hooks:            cfg.Hooks,
 	}, nil
 }
 
@@ -101,16 +104,19 @@ func (c *Consumer) Name() string {
 func (c *Consumer) IsReady() bool {
 	timeoutMs := int(c.readinessTimeout.Milliseconds())
 	if timeoutMs <= 0 {
-		timeoutMs = int(defaultReadinessTimeout.Milliseconds())
+		timeoutMs = int(shared.DefaultReadinessTimeout.Milliseconds())
 	}
 	_, err := c.client.GetMetadata(nil, false, timeoutMs)
 	return err == nil
 }
 
-func (c *Consumer) Consume(ctx context.Context) (Message, error) {
+func (c *Consumer) Consume(ctx context.Context) (_ Message, err error) {
+	start := time.Now()
+	defer func() { shared.CallHook(c.hooks.OnConsume, start, err) }()
+
 	for {
-		if err := ctx.Err(); err != nil {
-			return Message{}, err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return Message{}, ctxErr
 		}
 
 		event := c.client.Poll(200)
@@ -132,15 +138,18 @@ func (c *Consumer) Consume(ctx context.Context) (Message, error) {
 	}
 }
 
-func (c *Consumer) ConsumeBatch(ctx context.Context) ([]Message, error) {
+func (c *Consumer) ConsumeBatch(ctx context.Context) (messages []Message, err error) {
+	start := time.Now()
+	defer func() { shared.CallHook(c.hooks.OnConsumeBatch, start, err) }()
+
 	deadline := time.Now().Add(c.defaultBatchWait)
 	rawMessages := make([]*kafka.Message, 0, c.defaultMaxSize)
-	messages := make([]Message, 0, c.defaultMaxSize)
+	messages = make([]Message, 0, c.defaultMaxSize)
 
 	for len(rawMessages) < c.defaultMaxSize {
-		if err := ctx.Err(); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
 			c.setLastBatch(rawMessages)
-			return messages, err
+			return messages, ctxErr
 		}
 
 		remaining := time.Until(deadline)
@@ -192,8 +201,12 @@ func messageFromKafka(msg *kafka.Message) Message {
 	}
 }
 
-func (c *Consumer) Commit() error {
-	assignmentLost, err := c.commitOnce()
+func (c *Consumer) Commit() (err error) {
+	start := time.Now()
+	defer func() { shared.CallHook(c.hooks.OnCommit, start, err) }()
+
+	var assignmentLost bool
+	assignmentLost, err = c.commitOnce()
 	if err != nil {
 		return err
 	}
@@ -355,7 +368,7 @@ func (c *Consumer) reconnect() error {
 
 func (c *Consumer) commitOnce() (assignmentLost bool, err error) {
 	_, err = c.client.Commit()
-	if isAssignmentLostError(err) {
+	if shared.IsAssignmentLostError(err) {
 		return true, nil
 	}
 	if err != nil {
@@ -366,7 +379,7 @@ func (c *Consumer) commitOnce() (assignmentLost bool, err error) {
 
 func (c *Consumer) commitBatchOnce(offsets []kafka.TopicPartition) (assignmentLost bool, err error) {
 	committed, err := c.client.CommitOffsets(offsets)
-	if isAssignmentLostError(err) {
+	if shared.IsAssignmentLostError(err) {
 		return true, nil
 	}
 	if err != nil {
@@ -377,7 +390,7 @@ func (c *Consumer) commitBatchOnce(offsets []kafka.TopicPartition) (assignmentLo
 		if tp.Error == nil {
 			continue
 		}
-		if isAssignmentLostError(tp.Error) {
+		if shared.IsAssignmentLostError(tp.Error) {
 			return true, nil
 		}
 		topic := ""
